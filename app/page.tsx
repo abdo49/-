@@ -21,6 +21,7 @@ export default function LoginPage() {
     // Simulate login
     setTimeout(() => {
       if (username === "ABDOKIRATA" && password === "ABDO") {
+        document.cookie = "auth-token=authenticated; path=/; max-age=86400; SameSite=Strict"
         window.location.href = "/dashboard"
       } else {
         alert("اسم المستخدم أو كلمة المرور غير صحيحة")
