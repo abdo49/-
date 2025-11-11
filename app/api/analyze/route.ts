@@ -20,6 +20,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "يجب اختيار زوج واحد على الأقل" }, { status: 400 })
     }
 
+    let realPrices: Record<string, number> = {}
+    try {
+      const pricesResponse = await fetch(`${request.nextUrl.origin}/api/market-data`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbols: selectedPairs }),
+      })
+
+      if (pricesResponse.ok) {
+        const data = await pricesResponse.json()
+        realPrices = data.prices || {}
+        console.log("[v0] Fetched real prices from Pocket Option:", realPrices)
+      }
+    } catch (error) {
+      console.error("[v0] Failed to fetch real prices:", error)
+    }
+
     const signals = []
     const now = new Date()
 
@@ -34,7 +51,6 @@ export async function POST(request: NextRequest) {
     const endDate = new Date(now)
     endDate.setHours(endHour, endMinute, 0, 0)
 
-    // إذا كان وقت النهاية أقل من وقت البداية، فهذا يعني أن النطاق يعبر منتصف الليل
     if (endHour < startHour || (endHour === startHour && endMinute < startMinute)) {
       endDate.setDate(endDate.getDate() + 1)
     }
@@ -45,7 +61,11 @@ export async function POST(request: NextRequest) {
     const signalsPerPair = selectedPairs.length <= 5 ? 4 : selectedPairs.length <= 10 ? 3 : 2
 
     for (const pair of selectedPairs) {
+      const currentPrice = realPrices[pair] || Math.random() * 0.5 + 1.2
+
       const prompt = `أنت محلل خبير في الخيارات الثنائية مع خبرة 10 سنوات. قم بتحليل زوج ${pair} على الإطار الزمني ${timeframe}.
+
+السعر الحالي للزوج: ${currentPrice.toFixed(5)}
 
 المؤشرات الفنية المفعلة: ${indicators
         .filter((i: any) => i.enabled)
@@ -57,7 +77,7 @@ export async function POST(request: NextRequest) {
 - فترة البيانات التاريخية: ${historicalDays} أيام
 - نطاق الوقت: ${startTime} - ${endTime} (GMT+3) بنظام 24 ساعة
 
-قم بتحليل عميق وتوليد ${signalsPerPair}-${signalsPerPair + 2} إشارات قوية خلال الفترة الزمنية المحددة.
+قم بتحليل عميق وتوليد ${signalsPerPair}-${signalsPerPair + 2} إشارات قوية خلال الفترة الزمنية المحددة بناءً على السعر الحالي ${currentPrice.toFixed(5)}.
 
 لكل إشارة، يجب أن:
 1. تكون مدعومة بتطابق 2+ مؤشرات فنية على الأقل
@@ -65,26 +85,14 @@ export async function POST(request: NextRequest) {
 3. وقت دخول محدد ومختلف (موزع على مدار الفترة) بنظام 24 ساعة
 4. تحليل شموع يابانية
 5. اتجاه واضح في السوق
-
-مهم جداً: جميع أوقات الدخول يجب أن تكون ضمن النطاق ${startTime} - ${endTime} فقط!
-
-أعطني مصفوفة JSON فقط بهذا الشكل:
-[
-  {
-    "entryTime": "HH:MM" (وقت الدخول المحدد بتوقيت GMT+3 بنظام 24 ساعة، يجب أن يكون بين ${startTime} و ${endTime}),
-    "direction": "CALL" or "PUT",
-    "confidence": number (${successThreshold}-95),
-    "price": number (السعر التقريبي),
-    "reason": "سبب الإشارة بالتفصيل",
-    "supportingIndicators": ["مؤشر1", "مؤشر2", ...]
-  }
-]
+6. السعر المتوقع قريب من السعر الحالي ${currentPrice.toFixed(5)}
 
 مهم جداً: 
 - ${signalsPerPair}-${signalsPerPair + 2} إشارات قوية
 - أوقات دخول مختلفة ومتباعدة (5-10 دقائق بين كل إشارة)
 - نسبة ثقة ${successThreshold}%+ حسب قوة الإشارة
-- جميع الأوقات ضمن النطاق ${startTime} - ${endTime} فقط`
+- جميع الأوقات ضمن النطاق ${startTime} - ${endTime} فقط
+- الأسعار قريبة من السعر الحالي ${currentPrice.toFixed(5)}`
 
       try {
         const { text } = await generateText({
@@ -133,7 +141,6 @@ export async function POST(request: NextRequest) {
           const timeOffset = (timeRangeMs / (numSignals + 1)) * (i + 1)
           const entryDate = new Date(startDate.getTime() + timeOffset)
 
-          // تنسيق الوقت بنظام 24 ساعة
           const entryHour = entryDate.getHours()
           const entryMinute = entryDate.getMinutes()
           const entryTime = `${String(entryHour).padStart(2, "0")}:${String(entryMinute).padStart(2, "0")}`
@@ -155,7 +162,7 @@ export async function POST(request: NextRequest) {
             timestamp: new Date(),
             entryTime: entryTime,
             indicators: enabledIndicators.map((i: any) => i.name).slice(0, 3),
-            price: Number((Math.random() * 0.5 + 1.2).toFixed(5)),
+            price: Number((currentPrice + (Math.random() - 0.5) * 0.01).toFixed(5)),
             reason: `تحليل فني قوي: تطابق ${Math.min(enabledIndicators.length, 3)} مؤشرات تشير إلى ${direction === "CALL" ? "صعود" : "هبوط"}`,
           })
         }
