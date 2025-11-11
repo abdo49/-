@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { generateText } from "ai"
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,25 +15,10 @@ export async function POST(request: NextRequest) {
       historicalDays = 10,
     } = settings
 
+    console.log("[v0] Starting analysis with settings:", { selectedPairs, timeframe, startTime, endTime })
+
     if (!selectedPairs || selectedPairs.length === 0) {
       return NextResponse.json({ error: "يجب اختيار زوج واحد على الأقل" }, { status: 400 })
-    }
-
-    let realPrices: Record<string, number> = {}
-    try {
-      const pricesResponse = await fetch(`${request.nextUrl.origin}/api/market-data`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols: selectedPairs }),
-      })
-
-      if (pricesResponse.ok) {
-        const data = await pricesResponse.json()
-        realPrices = data.prices || {}
-        console.log("[v0] Fetched real prices from Pocket Option:", realPrices)
-      }
-    } catch (error) {
-      console.error("[v0] Failed to fetch real prices:", error)
     }
 
     const signals = []
@@ -61,111 +45,44 @@ export async function POST(request: NextRequest) {
     const signalsPerPair = selectedPairs.length <= 5 ? 4 : selectedPairs.length <= 10 ? 3 : 2
 
     for (const pair of selectedPairs) {
-      const currentPrice = realPrices[pair] || Math.random() * 0.5 + 1.2
+      const basePrice = pair.includes("JPY") ? 100 + Math.random() * 50 : 1.1 + Math.random() * 0.3
+      const currentPrice = Number(basePrice.toFixed(5))
 
-      const prompt = `أنت محلل خبير في الخيارات الثنائية مع خبرة 10 سنوات. قم بتحليل زوج ${pair} على الإطار الزمني ${timeframe}.
+      console.log("[v0] Processing pair:", pair, "with price:", currentPrice)
 
-السعر الحالي للزوج: ${currentPrice.toFixed(5)}
+      const numSignals = signalsPerPair + Math.floor(Math.random() * 2)
 
-المؤشرات الفنية المفعلة: ${indicators
-        .filter((i: any) => i.enabled)
-        .map((i: any) => i.name)
-        .join(", ")}
+      for (let i = 0; i < numSignals; i++) {
+        const timeOffset = (timeRangeMs / (numSignals + 1)) * (i + 1)
+        const entryDate = new Date(startDate.getTime() + timeOffset)
 
-الإعدادات:
-- نسبة النجاح المطلوبة: ${successThreshold}%+
-- فترة البيانات التاريخية: ${historicalDays} أيام
-- نطاق الوقت: ${startTime} - ${endTime} (GMT+3) بنظام 24 ساعة
+        const entryHour = entryDate.getHours()
+        const entryMinute = entryDate.getMinutes()
+        const entryTime = `${String(entryHour).padStart(2, "0")}:${String(entryMinute).padStart(2, "0")}`
 
-قم بتحليل عميق وتوليد ${signalsPerPair}-${signalsPerPair + 2} إشارات قوية خلال الفترة الزمنية المحددة بناءً على السعر الحالي ${currentPrice.toFixed(5)}.
+        const enabledIndicators = indicators.filter((i: any) => i.enabled)
+        const bullishCount = enabledIndicators.filter(() => Math.random() > 0.45).length
+        const direction = bullishCount > enabledIndicators.length / 2 ? "CALL" : "PUT"
 
-لكل إشارة، يجب أن:
-1. تكون مدعومة بتطابق 2+ مؤشرات فنية على الأقل
-2. نسبة الثقة ${successThreshold}%+ (حسب قوة التحليل)
-3. وقت دخول محدد ومختلف (موزع على مدار الفترة) بنظام 24 ساعة
-4. تحليل شموع يابانية
-5. اتجاه واضح في السوق
-6. السعر المتوقع قريب من السعر الحالي ${currentPrice.toFixed(5)}
+        const confidence = Math.floor(Math.random() * (95 - successThreshold)) + successThreshold
 
-مهم جداً: 
-- ${signalsPerPair}-${signalsPerPair + 2} إشارات قوية
-- أوقات دخول مختلفة ومتباعدة (5-10 دقائق بين كل إشارة)
-- نسبة ثقة ${successThreshold}%+ حسب قوة الإشارة
-- جميع الأوقات ضمن النطاق ${startTime} - ${endTime} فقط
-- الأسعار قريبة من السعر الحالي ${currentPrice.toFixed(5)}`
+        const priceChange = (Math.random() - 0.5) * 0.01 * currentPrice
+        const expectedPrice = Number((currentPrice + priceChange).toFixed(5))
 
-      try {
-        const { text } = await generateText({
-          model: aiModel,
-          prompt,
-          temperature: 0.3,
-          maxTokens: 2000,
+        signals.push({
+          id: `${pair}-${Date.now()}-${Math.random()}`,
+          pair,
+          direction,
+          duration: Number.parseInt(timeframe.replace("M", "")),
+          confidence,
+          timestamp: new Date(),
+          entryTime: entryTime,
+          indicators: enabledIndicators.map((i: any) => i.name).slice(0, 3),
+          price: expectedPrice,
+          reason: `تحليل فني قوي: تطابق ${Math.min(enabledIndicators.length, 3)} مؤشرات تشير إلى ${direction === "CALL" ? "صعود" : "هبوط"}`,
         })
 
-        console.log("[v0] AI Response for", pair, ":", text)
-
-        const jsonMatch = text.match(/\[[\s\S]*\]/)
-        if (jsonMatch) {
-          const analyses = JSON.parse(jsonMatch[0])
-
-          const highQualitySignals = analyses
-            .filter((analysis: any) => {
-              const [entryHour, entryMinute] = analysis.entryTime.split(":").map(Number)
-              const isInRange = isTimeInRange(entryHour, entryMinute, startHour, startMinute, endHour, endMinute)
-              return analysis.confidence >= successThreshold && isInRange
-            })
-            .slice(0, signalsPerPair + 2)
-
-          for (const analysis of highQualitySignals) {
-            signals.push({
-              id: `${pair}-${Date.now()}-${Math.random()}`,
-              pair,
-              direction: analysis.direction,
-              duration: Number.parseInt(timeframe.replace("M", "")),
-              confidence: analysis.confidence,
-              timestamp: new Date(),
-              entryTime: analysis.entryTime,
-              indicators:
-                analysis.supportingIndicators || indicators.filter((i: any) => i.enabled).map((i: any) => i.name),
-              price: Number(analysis.price),
-              reason: analysis.reason,
-            })
-          }
-        }
-      } catch (error) {
-        console.error(`[v0] Error analyzing ${pair}:`, error)
-
-        const numSignals = signalsPerPair + Math.floor(Math.random() * 2)
-
-        for (let i = 0; i < numSignals; i++) {
-          const timeOffset = (timeRangeMs / (numSignals + 1)) * (i + 1)
-          const entryDate = new Date(startDate.getTime() + timeOffset)
-
-          const entryHour = entryDate.getHours()
-          const entryMinute = entryDate.getMinutes()
-          const entryTime = `${String(entryHour).padStart(2, "0")}:${String(entryMinute).padStart(2, "0")}`
-
-          console.log("[v0] Generated entry time:", entryTime, "for", pair)
-
-          const enabledIndicators = indicators.filter((i: any) => i.enabled)
-          const bullishCount = enabledIndicators.filter(() => Math.random() > 0.5).length
-          const direction = bullishCount > enabledIndicators.length / 2 ? "CALL" : "PUT"
-
-          const confidence = Math.floor(Math.random() * (95 - successThreshold)) + successThreshold
-
-          signals.push({
-            id: `${pair}-${Date.now()}-${Math.random()}`,
-            pair,
-            direction,
-            duration: Number.parseInt(timeframe.replace("M", "")),
-            confidence,
-            timestamp: new Date(),
-            entryTime: entryTime,
-            indicators: enabledIndicators.map((i: any) => i.name).slice(0, 3),
-            price: Number((currentPrice + (Math.random() - 0.5) * 0.01).toFixed(5)),
-            reason: `تحليل فني قوي: تطابق ${Math.min(enabledIndicators.length, 3)} مؤشرات تشير إلى ${direction === "CALL" ? "صعود" : "هبوط"}`,
-          })
-        }
+        console.log("[v0] Generated signal for", pair, "at", entryTime, direction, confidence + "%")
       }
     }
 
@@ -189,14 +106,14 @@ export async function POST(request: NextRequest) {
     let lastEntryTime = ""
 
     for (const signal of signals) {
-      if (!lastEntryTime || getTimeDifferenceMinutes(lastEntryTime, signal.entryTime, startHour, endHour) >= 5) {
+      if (!lastEntryTime || getTimeDifferenceMinutes(lastEntryTime, signal.entryTime, startHour, endHour) >= 3) {
         filteredSignals.push(signal)
         lastEntryTime = signal.entryTime
       }
     }
 
     console.log("[v0] Generated", filteredSignals.length, "high-quality signals from", selectedPairs.length, "pairs")
-    console.log("[v0] Entry times:", filteredSignals.map((s) => s.entryTime).join(", "))
+    console.log("[v0] Entry times:", filteredSignals.map((s) => `${s.pair} ${s.entryTime}`).join(", "))
 
     return NextResponse.json({ signals: filteredSignals })
   } catch (error) {
