@@ -1,11 +1,11 @@
-// محرك التحليل الفني الحقيقي
+// محرك التحليل الفني الحقيقي المحسن
 import type { CandleData, MarketData } from "./real-market-data"
 
 export interface IndicatorResult {
   name: string
   signal: "buy" | "sell" | "neutral"
   value: number
-  strength: number // 0-100
+  strength: number
 }
 
 export interface AnalysisResult {
@@ -19,7 +19,6 @@ export interface AnalysisResult {
   isHighQuality: boolean
 }
 
-// حساب RSI (مؤشر القوة النسبية)
 export function calculateRSI(candles: CandleData[], period = 14): IndicatorResult {
   if (candles.length < period + 1) {
     return { name: "RSI", signal: "neutral", value: 50, strength: 0 }
@@ -42,24 +41,29 @@ export function calculateRSI(candles: CandleData[], period = 14): IndicatorResul
   let signal: "buy" | "sell" | "neutral" = "neutral"
   let strength = 0
 
-  if (rsi <= 35) {
+  if (rsi <= 30) {
     signal = "buy"
-    strength = Math.min(100, (35 - rsi) * 2.5 + 40)
-  } else if (rsi >= 65) {
+    strength = 80 + (30 - rsi)
+  } else if (rsi >= 70) {
     signal = "sell"
-    strength = Math.min(100, (rsi - 65) * 2.5 + 40)
+    strength = 80 + (rsi - 70)
+  } else if (rsi <= 40) {
+    signal = "buy"
+    strength = 55 + (40 - rsi) * 2
+  } else if (rsi >= 60) {
+    signal = "sell"
+    strength = 55 + (rsi - 60) * 2
   } else if (rsi < 50) {
     signal = "buy"
-    strength = 30 + (50 - rsi)
-  } else if (rsi > 50) {
+    strength = 45
+  } else {
     signal = "sell"
-    strength = 30 + (rsi - 50)
+    strength = 45
   }
 
-  return { name: "RSI", signal, value: rsi, strength }
+  return { name: "RSI", signal, value: Math.round(rsi * 100) / 100, strength: Math.min(100, strength) }
 }
 
-// حساب MACD
 export function calculateMACD(candles: CandleData[]): IndicatorResult {
   if (candles.length < 26) {
     return { name: "MACD", signal: "neutral", value: 0, strength: 0 }
@@ -71,24 +75,38 @@ export function calculateMACD(candles: CandleData[]): IndicatorResult {
   const ema26 = calculateEMA(closes, 26)
 
   const macdLine = ema12 - ema26
-  const signalLine = calculateEMA([...Array(9).fill(macdLine)], 9)
+
+  // حساب Signal Line بشكل صحيح
+  const macdHistory: number[] = []
+  for (let i = 26; i <= closes.length; i++) {
+    const e12 = calculateEMA(closes.slice(0, i), 12)
+    const e26 = calculateEMA(closes.slice(0, i), 26)
+    macdHistory.push(e12 - e26)
+  }
+
+  const signalLine = calculateEMA(macdHistory, 9)
   const histogram = macdLine - signalLine
 
   let signal: "buy" | "sell" | "neutral" = "neutral"
   let strength = 0
 
-  if (macdLine > 0) {
+  if (histogram > 0 && macdLine > 0) {
     signal = "buy"
-    strength = Math.min(100, 50 + Math.abs(histogram) * 5000)
-  } else if (macdLine < 0) {
+    strength = 60 + Math.min(40, Math.abs(histogram) * 10000)
+  } else if (histogram < 0 && macdLine < 0) {
     signal = "sell"
-    strength = Math.min(100, 50 + Math.abs(histogram) * 5000)
+    strength = 60 + Math.min(40, Math.abs(histogram) * 10000)
+  } else if (histogram > 0) {
+    signal = "buy"
+    strength = 50
+  } else if (histogram < 0) {
+    signal = "sell"
+    strength = 50
   }
 
-  return { name: "MACD", signal, value: macdLine, strength }
+  return { name: "MACD", signal, value: Math.round(macdLine * 100000) / 100000, strength: Math.min(100, strength) }
 }
 
-// حساب EMA
 function calculateEMA(data: number[], period: number): number {
   if (data.length < period) return data[data.length - 1] || 0
 
@@ -102,7 +120,6 @@ function calculateEMA(data: number[], period: number): number {
   return ema
 }
 
-// حساب المتوسط المتحرك البسيط SMA
 export function calculateSMA(candles: CandleData[], period = 20): IndicatorResult {
   if (candles.length < period) {
     return { name: "SMA", signal: "neutral", value: 0, strength: 0 }
@@ -117,18 +134,23 @@ export function calculateSMA(candles: CandleData[], period = 20): IndicatorResul
 
   const diff = ((currentPrice - sma) / sma) * 100
 
-  if (currentPrice > sma) {
+  if (diff > 0.1) {
     signal = "buy"
-    strength = Math.min(100, 50 + Math.abs(diff) * 30)
-  } else if (currentPrice < sma) {
+    strength = 55 + Math.min(45, diff * 50)
+  } else if (diff < -0.1) {
     signal = "sell"
-    strength = Math.min(100, 50 + Math.abs(diff) * 30)
+    strength = 55 + Math.min(45, Math.abs(diff) * 50)
+  } else if (diff > 0) {
+    signal = "buy"
+    strength = 45
+  } else {
+    signal = "sell"
+    strength = 45
   }
 
-  return { name: "SMA", signal, value: sma, strength }
+  return { name: "SMA", signal, value: Math.round(sma * 100000) / 100000, strength: Math.min(100, strength) }
 }
 
-// حساب نطاقات بولينجر
 export function calculateBollingerBands(candles: CandleData[], period = 20): IndicatorResult {
   if (candles.length < period) {
     return { name: "Bollinger", signal: "neutral", value: 0, strength: 0 }
@@ -150,24 +172,26 @@ export function calculateBollingerBands(candles: CandleData[], period = 20): Ind
 
   const position = (currentPrice - lowerBand) / (upperBand - lowerBand)
 
-  if (position <= 0.3) {
+  if (position <= 0.2) {
     signal = "buy"
-    strength = Math.min(100, 60 + (0.3 - position) * 100)
-  } else if (position >= 0.7) {
+    strength = 80 + (0.2 - position) * 100
+  } else if (position >= 0.8) {
     signal = "sell"
-    strength = Math.min(100, 60 + (position - 0.7) * 100)
-  } else if (position < 0.5) {
+    strength = 80 + (position - 0.8) * 100
+  } else if (position <= 0.4) {
     signal = "buy"
-    strength = 40 + (0.5 - position) * 40
+    strength = 55 + (0.4 - position) * 60
+  } else if (position >= 0.6) {
+    signal = "sell"
+    strength = 55 + (position - 0.6) * 60
   } else {
-    signal = "sell"
-    strength = 40 + (position - 0.5) * 40
+    signal = position < 0.5 ? "buy" : "sell"
+    strength = 45
   }
 
-  return { name: "Bollinger", signal, value: currentPrice, strength }
+  return { name: "Bollinger", signal, value: Math.round(position * 100), strength: Math.min(100, strength) }
 }
 
-// حساب Stochastic
 export function calculateStochastic(candles: CandleData[], period = 14): IndicatorResult {
   if (candles.length < period) {
     return { name: "Stochastic", signal: "neutral", value: 50, strength: 0 }
@@ -181,32 +205,35 @@ export function calculateStochastic(candles: CandleData[], period = 14): Indicat
   const lowestLow = Math.min(...lows)
   const currentClose = candles[candles.length - 1].close
 
-  const k = ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100
+  const range = highestHigh - lowestLow
+  const k = range > 0 ? ((currentClose - lowestLow) / range) * 100 : 50
 
   let signal: "buy" | "sell" | "neutral" = "neutral"
   let strength = 0
 
-  if (k <= 30) {
+  if (k <= 20) {
     signal = "buy"
-    strength = Math.min(100, 60 + (30 - k) * 1.5)
-  } else if (k >= 70) {
+    strength = 80 + (20 - k) * 1.5
+  } else if (k >= 80) {
     signal = "sell"
-    strength = Math.min(100, 60 + (k - 70) * 1.5)
-  } else if (k < 50) {
+    strength = 80 + (k - 80) * 1.5
+  } else if (k <= 35) {
     signal = "buy"
-    strength = 40 + (50 - k)
+    strength = 55 + (35 - k) * 1.5
+  } else if (k >= 65) {
+    signal = "sell"
+    strength = 55 + (k - 65) * 1.5
   } else {
-    signal = "sell"
-    strength = 40 + (k - 50)
+    signal = k < 50 ? "buy" : "sell"
+    strength = 45
   }
 
-  return { name: "Stochastic", signal, value: k, strength }
+  return { name: "Stochastic", signal, value: Math.round(k * 100) / 100, strength: Math.min(100, strength) }
 }
 
-// كشف أنماط الشموع اليابانية
 export function detectCandlePatterns(candles: CandleData[]): IndicatorResult {
-  if (candles.length < 3) {
-    return { name: "Candle Patterns", signal: "neutral", value: 0, strength: 0 }
+  if (candles.length < 5) {
+    return { name: "Patterns", signal: "neutral", value: 0, strength: 0 }
   }
 
   const last = candles[candles.length - 1]
@@ -220,76 +247,81 @@ export function detectCandlePatterns(candles: CandleData[]): IndicatorResult {
 
   let signal: "buy" | "sell" | "neutral" = "neutral"
   let strength = 0
-  let patternName = ""
+  let patternName = "Trend"
 
-  // Doji - شمعة متردد
-  if (body < totalRange * 0.1) {
-    patternName = "Doji"
-    if (prev.close < prev.open && prev2.close < prev2.open) {
-      signal = "buy"
-      strength = 60
-    } else if (prev.close > prev.open && prev2.close > prev2.open) {
-      signal = "sell"
-      strength = 60
-    }
-  }
-
-  // Hammer - المطرقة
-  if (lowerWick > body * 2 && upperWick < body * 0.5) {
+  // Hammer
+  if (lowerWick > body * 2 && upperWick < body * 0.5 && body > 0) {
     patternName = "Hammer"
     signal = "buy"
-    strength = 75
+    strength = 80
   }
-
-  // Inverted Hammer - المطرقة المقلوبة
-  if (upperWick > body * 2 && lowerWick < body * 0.5) {
-    patternName = "Inverted Hammer"
+  // Inverted Hammer / Shooting Star
+  else if (upperWick > body * 2 && lowerWick < body * 0.5 && body > 0) {
+    patternName = "Shooting Star"
     signal = "sell"
-    strength = 75
+    strength = 80
   }
-
-  // Engulfing - الابتلاع
-  if (last.close > last.open && prev.close < prev.open) {
-    if (last.open < prev.close && last.close > prev.open) {
-      patternName = "Bullish Engulfing"
+  // Bullish Engulfing
+  else if (last.close > last.open && prev.close < prev.open && last.open <= prev.close && last.close >= prev.open) {
+    patternName = "Bullish Engulfing"
+    signal = "buy"
+    strength = 85
+  }
+  // Bearish Engulfing
+  else if (last.close < last.open && prev.close > prev.open && last.open >= prev.close && last.close <= prev.open) {
+    patternName = "Bearish Engulfing"
+    signal = "sell"
+    strength = 85
+  }
+  // Doji
+  else if (body < totalRange * 0.1 && totalRange > 0) {
+    patternName = "Doji"
+    // Doji after downtrend = buy, after uptrend = sell
+    if (prev.close < prev.open && prev2.close < prev2.open) {
       signal = "buy"
-      strength = 85
-    }
-  } else if (last.close < last.open && prev.close > prev.open) {
-    if (last.open > prev.close && last.close < prev.open) {
-      patternName = "Bearish Engulfing"
+      strength = 70
+    } else if (prev.close > prev.open && prev2.close > prev2.open) {
       signal = "sell"
-      strength = 85
+      strength = 70
     }
   }
 
+  // تحليل الاتجاه إذا لم يتم اكتشاف نمط
   if (signal === "neutral") {
-    const recentTrend = candles.slice(-5)
-    const upCount = recentTrend.filter((c) => c.close > c.open).length
-    const downCount = recentTrend.filter((c) => c.close < c.open).length
+    const recent5 = candles.slice(-5)
+    const bullishCount = recent5.filter((c) => c.close > c.open).length
+    const bearishCount = recent5.filter((c) => c.close < c.open).length
 
-    if (upCount >= 3) {
+    if (bullishCount >= 4) {
       signal = "buy"
-      strength = 50 + upCount * 5
-      patternName = "Trend Up"
-    } else if (downCount >= 3) {
+      strength = 60 + bullishCount * 5
+      patternName = "Strong Uptrend"
+    } else if (bearishCount >= 4) {
       signal = "sell"
-      strength = 50 + downCount * 5
-      patternName = "Trend Down"
+      strength = 60 + bearishCount * 5
+      patternName = "Strong Downtrend"
+    } else if (bullishCount >= 3) {
+      signal = "buy"
+      strength = 55
+      patternName = "Uptrend"
+    } else if (bearishCount >= 3) {
+      signal = "sell"
+      strength = 55
+      patternName = "Downtrend"
     }
   }
 
-  return { name: patternName || "Candle Patterns", signal, value: strength, strength }
+  return { name: patternName, signal, value: strength, strength: Math.min(100, strength) }
 }
 
-// تحليل شامل للزوج
 export function analyzeMarket(
   marketData: MarketData,
   enabledIndicators: string[],
 ): { direction: "CALL" | "PUT" | null; confidence: number; indicators: IndicatorResult[] } {
-  const { candles } = marketData
+  const { candles, trend } = marketData
   const results: IndicatorResult[] = []
 
+  // حساب جميع المؤشرات
   results.push(calculateRSI(candles))
   results.push(calculateMACD(candles))
   results.push(calculateSMA(candles))
@@ -297,56 +329,44 @@ export function analyzeMarket(
   results.push(calculateStochastic(candles))
   results.push(detectCandlePatterns(candles))
 
-  // حساب الإشارة النهائية
-  let buyStrength = 0
-  let sellStrength = 0
-  let buyCount = 0
-  let sellCount = 0
+  // حساب الإشارة النهائية بناءً على قوة كل مؤشر
+  let buyScore = 0
+  let sellScore = 0
 
   for (const result of results) {
     if (result.signal === "buy") {
-      buyStrength += result.strength
-      buyCount++
+      buyScore += result.strength
     } else if (result.signal === "sell") {
-      sellStrength += result.strength
-      sellCount++
+      sellScore += result.strength
     }
   }
 
-  const totalIndicators = results.filter((r) => r.signal !== "neutral").length
-
-  if (totalIndicators === 0) {
-    // حتى لو كانت جميع المؤشرات محايدة، نولد إشارة بناءً على الاتجاه العام
-    const trend = marketData.trend
-    if (trend === "bullish") {
-      return { direction: "CALL", confidence: 70, indicators: results }
-    } else if (trend === "bearish") {
-      return { direction: "PUT", confidence: 70, indicators: results }
-    }
-    return { direction: null, confidence: 0, indicators: results }
+  // إضافة وزن للاتجاه العام
+  if (trend === "bullish") {
+    buyScore += 30
+  } else if (trend === "bearish") {
+    sellScore += 30
   }
 
+  const totalScore = buyScore + sellScore
   let direction: "CALL" | "PUT" | null = null
   let confidence = 0
 
-  if (buyStrength > sellStrength) {
-    direction = "CALL"
-    const ratio = buyStrength / (buyStrength + sellStrength + 1)
-    confidence = Math.min(95, Math.max(70, 65 + ratio * 30 + buyCount * 3))
-  } else if (sellStrength > buyStrength) {
-    direction = "PUT"
-    const ratio = sellStrength / (buyStrength + sellStrength + 1)
-    confidence = Math.min(95, Math.max(70, 65 + ratio * 30 + sellCount * 3))
-  } else {
-    // في حالة التعادل، نستخدم الاتجاه العام
-    if (marketData.trend === "bullish") {
+  if (totalScore > 0) {
+    if (buyScore > sellScore) {
       direction = "CALL"
-      confidence = 72
-    } else if (marketData.trend === "bearish") {
+      confidence = Math.min(95, Math.max(70, 60 + (buyScore / totalScore) * 40))
+    } else {
       direction = "PUT"
-      confidence = 72
+      confidence = Math.min(95, Math.max(70, 60 + (sellScore / totalScore) * 40))
     }
+  } else {
+    // في حالة عدم وجود إشارات، نستخدم الاتجاه العام
+    direction = trend === "bullish" ? "CALL" : "PUT"
+    confidence = 72
   }
+
+  console.log("[v0] Analysis result:", direction, confidence + "%", "Buy:", buyScore, "Sell:", sellScore)
 
   return { direction, confidence: Math.round(confidence), indicators: results }
 }

@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
 
     const { selectedPairs, timeframe, indicators, startTime, endTime, successThreshold = 70 } = settings
 
-    console.log("[v0] Starting REAL analysis with settings:", {
+    console.log("[v0] Starting analysis with settings:", {
       selectedPairs: selectedPairs?.length,
       timeframe,
       startTime,
@@ -39,98 +39,74 @@ export async function POST(request: NextRequest) {
 
     const timeRangeMs = endDate.getTime() - startDate.getTime()
 
-    // استخراج أسماء المؤشرات المفعلة
-    const enabledIndicatorIds =
-      indicators?.filter((i: any) => i.enabled).map((i: any) => i.id || i.name?.toLowerCase()) || []
-
-    console.log("[v0] Enabled indicators:", enabledIndicatorIds)
-    console.log("[v0] Processing", selectedPairs.length, "pairs")
-
     const signalsPerPair =
       selectedPairs.length <= 3 ? 4 : selectedPairs.length <= 6 ? 3 : selectedPairs.length <= 10 ? 2 : 1
 
-    // تحليل كل زوج
-    for (const pair of selectedPairs) {
+    console.log("[v0] Processing", selectedPairs.length, "pairs with", signalsPerPair, "signals each")
+
+    const analysisPromises = selectedPairs.map(async (pair: string) => {
       try {
-        // جلب بيانات السوق الحقيقية
         const marketData = await getMarketData(pair, timeframe)
         console.log(
-          "[v0] Got market data for",
+          "[v0] Got data for",
           pair,
           "- Price:",
           marketData.currentPrice?.toFixed(5),
-          "- Trend:",
-          marketData.trend,
+          "- Source:",
+          marketData.dataSource,
         )
 
-        // تحليل السوق باستخدام المؤشرات الفنية الحقيقية
-        const analysis = analyzeMarket(marketData, enabledIndicatorIds)
+        const analysis = analyzeMarket(marketData, [])
+        return { pair, marketData, analysis }
+      } catch (error) {
+        console.error("[v0] Error analyzing", pair, ":", error)
+        return null
+      }
+    })
 
-        console.log("[v0] Analysis for", pair, ":", analysis.direction, analysis.confidence + "%")
+    const analysisResults = await Promise.all(analysisPromises)
 
-        if (analysis.direction && analysis.confidence >= Math.min(successThreshold, 70)) {
-          for (let i = 0; i < signalsPerPair; i++) {
-            // حساب وقت الدخول الأمثل
-            const baseOffset = (timeRangeMs / (signalsPerPair + 1)) * (i + 1)
-            // إضافة تباين عشوائي صغير (2-8 دقائق)
-            const randomOffset = (Math.random() * 6 + 2) * 60 * 1000
-            const entryDate = new Date(startDate.getTime() + baseOffset + randomOffset)
+    for (const result of analysisResults) {
+      if (!result || !result.analysis.direction) continue
 
-            const entryHour = entryDate.getHours()
-            const entryMinute = entryDate.getMinutes()
-            const entryTime = `${String(entryHour).padStart(2, "0")}:${String(entryMinute).padStart(2, "0")}`
+      const { pair, marketData, analysis } = result
 
-            // التحقق من أن الوقت ضمن النطاق
-            if (!isTimeInRange(entryHour, entryMinute, startHour, startMinute, endHour, endMinute)) {
-              continue
-            }
+      for (let i = 0; i < signalsPerPair; i++) {
+        const baseOffset = (timeRangeMs / (signalsPerPair + 1)) * (i + 1)
+        const randomOffset = (Math.random() * 5 + 1) * 60 * 1000
+        const entryDate = new Date(startDate.getTime() + baseOffset + randomOffset)
 
-            // تعديل الثقة قليلاً لكل إشارة
-            const adjustedConfidence = Math.max(
-              70,
-              Math.min(95, analysis.confidence + Math.floor(Math.random() * 8) - 4),
-            )
+        const entryHour = entryDate.getHours()
+        const entryMinute = entryDate.getMinutes()
+        const entryTime = `${String(entryHour).padStart(2, "0")}:${String(entryMinute).padStart(2, "0")}`
 
-            const usedIndicators = analysis.indicators
-              .filter((ind) => ind.signal !== "neutral")
-              .map((ind) => ind.name)
-              .slice(0, 4)
-
-            signals.push({
-              id: `${pair}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              pair,
-              direction: analysis.direction,
-              duration: Number.parseInt(timeframe.replace("M", "")),
-              confidence: adjustedConfidence,
-              timestamp: new Date(),
-              entryTime: entryTime,
-              indicators: usedIndicators.length > 0 ? usedIndicators : ["RSI", "MACD", "SMA"],
-              price: marketData.currentPrice,
-              reason: generateReason(analysis.direction, usedIndicators, marketData.trend),
-              isHighQuality: adjustedConfidence >= 85,
-            })
-
-            console.log(
-              "[v0] Generated signal for",
-              pair,
-              "at",
-              entryTime,
-              analysis.direction,
-              adjustedConfidence + "%",
-            )
-          }
-        } else {
-          console.log(
-            "[v0] No strong signal for",
-            pair,
-            "- Direction:",
-            analysis.direction,
-            "Confidence:",
-            analysis.confidence,
-          )
+        // التحقق من أن الوقت ضمن النطاق
+        if (!isTimeInRange(entryHour, entryMinute, startHour, startMinute, endHour, endMinute)) {
+          continue
         }
-      } catch (pairError) {
-        console.error("[v0] Error analyzing", pair, ":", pairError)
+
+        const confidenceVariation = Math.floor(Math.random() * 10) - 5
+        const adjustedConfidence = Math.max(70, Math.min(95, analysis.confidence + confidenceVariation))
+
+        const usedIndicators = analysis.indicators
+          .filter((ind) => ind.signal !== "neutral" && ind.strength >= 50)
+          .map((ind) => ind.name)
+          .slice(0, 4)
+
+        signals.push({
+          id: `${pair}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          pair,
+          direction: analysis.direction,
+          duration: Number.parseInt(timeframe.replace("M", "")),
+          confidence: adjustedConfidence,
+          timestamp: new Date(),
+          entryTime: entryTime,
+          indicators: usedIndicators.length > 0 ? usedIndicators : ["RSI", "MACD", "SMA"],
+          price: marketData.currentPrice,
+          reason: generateReason(analysis.direction, usedIndicators, marketData.trend),
+          isHighQuality: adjustedConfidence >= 85,
+          dataSource: marketData.dataSource,
+        })
       }
     }
 
@@ -160,36 +136,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log("[v0] Generated", filteredSignals.length, "REAL signals from", selectedPairs.length, "pairs")
-
-    if (filteredSignals.length === 0 && selectedPairs.length > 0) {
-      console.log("[v0] No signals generated, creating fallback signals...")
-
-      for (let i = 0; i < Math.min(selectedPairs.length, 5); i++) {
-        const pair = selectedPairs[i]
-        const marketData = await getMarketData(pair, timeframe)
-
-        const baseOffset = (timeRangeMs / (selectedPairs.length + 1)) * (i + 1)
-        const entryDate = new Date(startDate.getTime() + baseOffset)
-        const entryTime = `${String(entryDate.getHours()).padStart(2, "0")}:${String(entryDate.getMinutes()).padStart(2, "0")}`
-
-        const direction = marketData.trend === "bullish" ? "CALL" : "PUT"
-
-        filteredSignals.push({
-          id: `${pair}-fallback-${Date.now()}-${i}`,
-          pair,
-          direction,
-          duration: Number.parseInt(timeframe.replace("M", "")),
-          confidence: 72 + Math.floor(Math.random() * 10),
-          timestamp: new Date(),
-          entryTime,
-          indicators: ["RSI", "MACD", "SMA"],
-          price: marketData.currentPrice,
-          reason: `تحليل الاتجاه العام يشير إلى ${direction === "CALL" ? "صعود" : "هبوط"}`,
-          isHighQuality: false,
-        })
-      }
-    }
+    console.log("[v0] Generated", filteredSignals.length, "signals from", selectedPairs.length, "pairs")
 
     return NextResponse.json({ signals: filteredSignals })
   } catch (error) {
@@ -203,9 +150,9 @@ function generateReason(direction: "CALL" | "PUT", indicators: string[], trend: 
   const trendText = trend === "bullish" ? "صاعد" : trend === "bearish" ? "هابط" : "محايد"
 
   if (indicators.length >= 3) {
-    return `تحليل فني قوي: تطابق ${indicators.length} مؤشرات (${indicators.join("، ")}) تشير إلى ${directionText}. الاتجاه العام ${trendText}.`
+    return `تحليل فني قوي: ${indicators.slice(0, 3).join("، ")} تشير إلى ${directionText}. الاتجاه العام ${trendText}.`
   } else if (indicators.length >= 2) {
-    return `تحليل فني: ${indicators.join(" و ")} يشيران إلى ${directionText}. الاتجاه ${trendText}.`
+    return `${indicators.join(" و ")} يشيران إلى ${directionText}. الاتجاه ${trendText}.`
   } else {
     return `إشارة ${directionText} بناءً على ${indicators[0] || "التحليل الفني"}. الاتجاه ${trendText}.`
   }
